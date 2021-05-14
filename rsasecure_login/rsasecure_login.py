@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, sys, getpass, argparse, requests, urllib3, re, pickle, json
 from urllib.parse import urlparse
-import logging
+import logging, socks
 logging.getLogger(requests.packages.urllib3.__package__).setLevel(logging.ERROR)
 
 try:
@@ -14,12 +14,14 @@ class Client:
     def __init__(self, args):
         self.__args = args
         self.__fqdn = urlparse(args.server).hostname
+        if self.__fqdn is None:
+            self.__fqdn = args.server
         self.session = requests.Session()
 
     def _saveCookie(self):
         cookie_file = '%s' % (os.path.sep).join([os.path.expanduser("~"),
                                                  '.RSASecureID_login',
-                                                 self.__fqn])
+                                                 self.__fqdn])
         if not os.path.exists(os.path.dirname(cookie_file)):
             try:
                 os.makedirs(os.path.dirname(cookie_file))
@@ -58,25 +60,41 @@ class Client:
         return (username, passcode)
 
     def createConnection(self):
-        response = self.session.get('https://%s' % (self.__fqdn),
-                                    verify=not self.__args.insecure)
-        if response.status_code != 200:
-            print('ERROR connecting to %s' % (self.__fqdn))
-        token = re.findall('name="csrftoken" value="(\w+)', response.text)
-        (username, passcode) = self._getCredentials()
-        response = self.session.post('https://%s/webauthentication' % (self.__fqdn),
-                                     verify=not self.__args.insecure,
-                                     data={'csrftoken' : token[0],
-                                           'username'  : username,
-                                           'passcode'  : passcode})
-        if response.status_code != 200:
-            print('ERROR authenticating to %s' (self.__args.server))
-            sys.exit(1)
-        elif not re.search('Authentication Succeeded', response.text):
-            print('ERROR authenticating, credentials invalid.')
-            sys.exit(1)
-        self._saveCookie()
-        self._addChannel()
+        try:
+            response = self.session.get('https://%s' % (self.__fqdn), verify=not self.__args.insecure)
+            if response.status_code != 200:
+                print('ERROR connecting to %s' % (self.__fqdn))
+                sys.exit(1)
+            token = re.findall('name="csrftoken" value="(\w+)', response.text)
+            (username, passcode) = self._getCredentials()
+            response = self.session.post('https://%s/webauthentication' % (self.__fqdn),
+                                         verify=not self.__args.insecure,
+                                         data={'csrftoken' : token[0],
+                                               'username'  : username,
+                                               'passcode'  : passcode})
+            if response.status_code != 200:
+                print('ERROR authenticating to %s' % (self.__fqdn))
+                sys.exit(1)
+            elif not re.search('Authentication Succeeded', response.text):
+                print('ERROR authenticating, credentials invalid.')
+                sys.exit(1)
+            self._saveCookie()
+            self._addChannel()
+            return
+
+        except requests.exceptions.ConnectTimeout:
+            print('Unable to establish a connection to: %s' % (self.__fqdn))
+        except (requests.exceptions.ProxyError,
+                urllib3.exceptions.ProxySchemeUnknown,
+                urllib3.exceptions.NewConnectionError):
+            print('Proxy information incorrect: %s' % (os.getenv('https_proxy')))
+        except requests.exceptions.SSLError:
+            print('Unable to establish a secure connection. If you trust this server, you can use --insecure')
+        except ValueError:
+            print('Unable to determine SOCKS version from https_proxy environment variable')
+        except requests.exceptions.ConnectionError as e:
+            print('General error connecting to server: %s' % (self.__fqdn))
+        sys.exit(1)
 
 def verifyArgs(parser):
     args = parser.parse_args()
@@ -94,7 +112,7 @@ def parseArgs():
     parser.add_argument('-s', '--server', nargs="?",
                         help='RSA protected server containing Conda packages')
     parser.add_argument('-k', '--insecure', action="store_true", default=False,
-                        help="Allow untrusted SSL certificates (default: %(default))")
+                        help="Allow untrusted SSL certificates")
     return verifyArgs(parser)
 
 if __name__ == '__main__':
