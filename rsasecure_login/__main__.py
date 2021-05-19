@@ -125,8 +125,13 @@ def parseArgs():
                               ' limitation, all channels will be untrusted.'))
     return verifyArgs(parser)
 
-if __name__ == '__main__':
-    args = parseArgs()
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    args = parseArgs(argv)
     rsaclient = Client(args)
     rsaclient.createConnection()
-    sys.exit(0)
+
+if __name__ == '__main__':
+    main()

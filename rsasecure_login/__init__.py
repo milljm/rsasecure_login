@@ -1,1 +1,1 @@
-from .rsasecure_login import Client
+from .__main__ import Client
