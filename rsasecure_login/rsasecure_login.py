@@ -13,15 +13,12 @@ except:
 class Client:
     def __init__(self, args):
         self.__args = args
-        self.__fqdn = urlparse(args.server).hostname
-        if self.__fqdn is None:
-            self.__fqdn = args.server
         self.session = requests.Session()
 
     def _saveCookie(self):
         cookie_file = '%s' % (os.path.sep).join([os.path.expanduser("~"),
                                                  '.RSASecureID_login',
-                                                 self.__fqdn])
+                                                 self.__args.fqdn])
         if not os.path.exists(os.path.dirname(cookie_file)):
             try:
                 os.makedirs(os.path.dirname(cookie_file))
@@ -37,10 +34,10 @@ class Client:
                                          'channels',
                                          '--json')
         jsond = json.loads(channels[0])
-        if 'channels' in jsond and not 'rsa://%s' % (self.__args.server) in jsond['channels']:
+        if 'channels' in jsond and not self.__args.server in jsond['channels']:
             conda_api.run_command('config',
                                   '--add',
-                                  'channels', 'rsa://%s' % (self.__args.server),
+                                  'channels', self.__args.uri,
                                   stdout=sys.stdout,
                                   stderr=sys.stderr)
 
@@ -61,19 +58,19 @@ class Client:
 
     def createConnection(self):
         try:
-            response = self.session.get('https://%s' % (self.__fqdn), verify=not self.__args.insecure)
+            response = self.session.get('https://%s' % (self.__args.fqdn), verify=not self.__args.insecure)
             if response.status_code != 200:
-                print('ERROR connecting to %s' % (self.__fqdn))
+                print('ERROR connecting to %s' % (self.__args.fqdn))
                 sys.exit(1)
             token = re.findall('name="csrftoken" value="(\w+)', response.text)
             (username, passcode) = self._getCredentials()
-            response = self.session.post('https://%s/webauthentication' % (self.__fqdn),
+            response = self.session.post('https://%s/webauthentication' % (self.__args.fqdn),
                                          verify=not self.__args.insecure,
                                          data={'csrftoken' : token[0],
                                                'username'  : username,
                                                'passcode'  : passcode})
             if response.status_code != 200:
-                print('ERROR authenticating to %s' % (self.__fqdn))
+                print('ERROR authenticating to %s' % (self.__args.fqdn))
                 sys.exit(1)
             elif not re.search('Authentication Succeeded', response.text):
                 print('ERROR authenticating, credentials invalid.')
@@ -83,36 +80,49 @@ class Client:
             return
 
         except requests.exceptions.ConnectTimeout:
-            print('Unable to establish a connection to: %s' % (self.__fqdn))
+            print('Unable to establish a connection to: https://%s' % (self.__args.fqdn))
         except (requests.exceptions.ProxyError,
                 urllib3.exceptions.ProxySchemeUnknown,
                 urllib3.exceptions.NewConnectionError):
             print('Proxy information incorrect: %s' % (os.getenv('https_proxy')))
         except requests.exceptions.SSLError:
-            print('Unable to establish a secure connection. If you trust this server, you can use --insecure')
+            print('Unable to establish a secure connection.',
+                  'If you trust this server, you can use --insecure')
         except ValueError:
-            print('Unable to determine SOCKS version from https_proxy environment variable')
+            print('Unable to determine SOCKS version from https_proxy',
+                  'environment variable')
         except requests.exceptions.ConnectionError as e:
-            print('General error connecting to server: %s' % (self.__fqdn))
+            print('General error connecting to server: https://%s' % (self.__args.fqdn))
         sys.exit(1)
 
 def verifyArgs(parser):
     args = parser.parse_args()
     if not args.server:
-        print('You must specify a server to connect to')
+        print('You must specify a URI to secure Conda channel')
+        parser.print_help(sys.stderr)
         sys.exit(1)
+    elif '//' in args.server or len(args.server.split('/')) != 2:
+        print('Invalid URI prefix. Please provide only a hostname/channel',
+              '\nExample:\n\tserver.com/channel')
+        sys.exit(1)
+
     if args.insecure:
         from urllib3.exceptions import InsecureRequestWarning
         requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+    args.fqdn = urlparse('https://%s' % (args.server)).hostname
+    args.uri = 'rsa://%s' % (args.server)
     return args
 
 def parseArgs():
-    parser = argparse.ArgumentParser(description='Create/Update RSA Tokens to specified server')
     formatter = lambda prog: argparse.HelpFormatter(prog, max_help_position=22, width=90)
+    parser = argparse.ArgumentParser(description='Create/Update RSA Tokens to specified server',
+                                     formatter_class=formatter)
     parser.add_argument('-s', '--server', nargs="?",
-                        help='RSA protected server containing Conda packages')
+                        help=('RSA protected server URI containing Conda packages.'
+                              ' Example: server.com/channel'))
     parser.add_argument('-k', '--insecure', action="store_true", default=False,
-                        help="Allow untrusted SSL certificates")
+                        help=('Allow untrusted connections. Note: Due to conda channel'
+                              ' limitation, all channels will be untrusted.'))
     return verifyArgs(parser)
 
 if __name__ == '__main__':
