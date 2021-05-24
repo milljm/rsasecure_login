@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-import os, sys, getpass, argparse, requests, urllib3, re, pickle, json
+import os
+import sys
+import getpass
+import argparse
+import requests
+import urllib3
+import re
+import pickle
+import json
 from urllib.parse import urlparse
-import logging, socks
+import logging
 logging.getLogger(requests.packages.urllib3.__package__).setLevel(logging.ERROR)
 
 try:
@@ -95,8 +103,7 @@ class Client:
             print('General error connecting to server: https://%s' % (self.__args.fqdn))
         sys.exit(1)
 
-def verifyArgs(parser):
-    args = parser.parse_args()
+def verifyArgs(args, parser):
     if not args.server:
         print('You must specify a URI to secure Conda channel')
         parser.print_help(sys.stderr)
@@ -113,7 +120,7 @@ def verifyArgs(parser):
     args.uri = 'rsa://%s' % (args.server)
     return args
 
-def parseArgs():
+def parseArgs(argv=None):
     formatter = lambda prog: argparse.HelpFormatter(prog, max_help_position=22, width=90)
     parser = argparse.ArgumentParser(description='Create/Update RSA Tokens to specified server',
                                      formatter_class=formatter)
@@ -123,7 +130,8 @@ def parseArgs():
     parser.add_argument('-k', '--insecure', action="store_true", default=False,
                         help=('Allow untrusted connections. Note: Due to conda channel'
                               ' limitation, all channels will be untrusted.'))
-    return verifyArgs(parser)
+    args = parser.parse_args(argv)
+    return verifyArgs(args, parser)
 
 def main(argv=None):
     if argv is None:
